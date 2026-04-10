@@ -23,6 +23,9 @@ src-tauri/target
 *.pem
 *.key
 
+# Docs (draft posts, internal notes)
+docs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -232,6 +232,7 @@ pub fn switch_profile(profile_name: &str, game_root: &Path) -> AppResult<()> {
 }
 
 /// Save the current game BepInEx state back to a profile.
+/// Also detects untracked mods (manually installed) and adds them to profile metadata.
 pub fn save_game_state_to_profile(profile_name: &str, game_root: &Path) -> AppResult<()> {
     let profile_dir = get_profile_dir(profile_name);
     let game_bepinex = game_root.join("BepInEx");
@@ -239,6 +240,47 @@ pub fn save_game_state_to_profile(profile_name: &str, game_root: &Path) -> AppRe
 
     if !game_bepinex.exists() {
         return Ok(());
+    }
+
+    // Detect and register untracked mods before copying files
+    let plugins_dir = game_bepinex.join("plugins");
+    if plugins_dir.exists() {
+        if let Ok(mut profile) = load_profile(profile_name) {
+            let tracked: std::collections::HashSet<String> =
+                profile.mods.iter().map(|m| m.full_name.clone()).collect();
+
+            if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+                let mut added = false;
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if entry.path().is_dir() && !name.starts_with('.') && !tracked.contains(&name) {
+                        info!("Registering untracked mod in profile '{}': {}", profile_name, name);
+                        let parts: Vec<&str> = name.splitn(2, '-').collect();
+                        let (author, mod_name) = if parts.len() == 2 {
+                            (parts[0].to_string(), parts[1].to_string())
+                        } else {
+                            ("Unknown".to_string(), name.clone())
+                        };
+                        profile.mods.push(InstalledMod {
+                            full_name: name,
+                            author,
+                            name: mod_name,
+                            version: "0.0.0".to_string(),
+                            description: "Manually installed".to_string(),
+                            enabled: true,
+                            dependencies: Vec::new(),
+                            installed_at: chrono::Utc::now().to_rfc3339(),
+                            icon: String::new(),
+                        });
+                        added = true;
+                    }
+                }
+                if added {
+                    profile.touch();
+                    let _ = save_profile(&profile);
+                }
+            }
+        }
     }
 
     let dirs_to_sync = ["plugins", "patchers", "config", "plugins_disabled"];
@@ -256,6 +298,57 @@ pub fn save_game_state_to_profile(profile_name: &str, game_root: &Path) -> AppRe
 
     debug!("Saved game state to profile: {}", profile_name);
     Ok(())
+}
+
+/// Import existing mods from the game directory into a profile.
+/// Called on first launch when user already has manually installed mods.
+pub fn import_existing_mods(profile_name: &str, game_root: &Path) -> AppResult<Vec<String>> {
+    let game_plugins = game_root.join("BepInEx/plugins");
+    if !game_plugins.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut profile = load_profile(profile_name)?;
+    let tracked: std::collections::HashSet<String> =
+        profile.mods.iter().map(|m| m.full_name.clone()).collect();
+
+    let mut imported = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&game_plugins) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if entry.path().is_dir() && !name.starts_with('.') && !tracked.contains(&name) {
+                let parts: Vec<&str> = name.splitn(2, '-').collect();
+                let (author, mod_name) = if parts.len() == 2 {
+                    (parts[0].to_string(), parts[1].to_string())
+                } else {
+                    ("Unknown".to_string(), name.clone())
+                };
+                profile.mods.push(InstalledMod {
+                    full_name: name.clone(),
+                    author,
+                    name: mod_name,
+                    version: "0.0.0".to_string(),
+                    description: "Manually installed".to_string(),
+                    enabled: true,
+                    dependencies: Vec::new(),
+                    installed_at: chrono::Utc::now().to_rfc3339(),
+                    icon: String::new(),
+                });
+                imported.push(name);
+            }
+        }
+    }
+
+    if !imported.is_empty() {
+        info!("Imported {} existing mods into profile '{}'", imported.len(), profile_name);
+        // Also copy game BepInEx state to the profile directory
+        save_game_state_to_profile(profile_name, game_root)?;
+        profile.touch();
+        save_profile(&profile)?;
+    }
+
+    Ok(imported)
 }
 
 /// Add a mod to a profile's metadata.

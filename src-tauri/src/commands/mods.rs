@@ -390,6 +390,40 @@ pub struct SyncResult {
     pub cleaned: Vec<String>,
 }
 
+/// List mods in the plugins directory that are not tracked by the current profile.
+/// Used by the frontend to show a confirmation dialog before cleaning.
+#[tauri::command]
+pub async fn list_unmanaged_mods(
+    state: tauri::State<'_, Mutex<AppState>>,
+) -> AppResult<Vec<String>> {
+    let (game_path, active_profile) = {
+        let s = state.lock().map_err(|e| AppError::Mod(format!("Lock: {}", e)))?;
+        let gp = s.game_path.clone().ok_or_else(|| AppError::Mod("Game not set".into()))?;
+        (gp, s.active_profile.clone())
+    };
+
+    let game_root = game_detector::get_valheim_root(&game_path);
+    let plugins_dir = game_root.join("BepInEx/plugins");
+
+    let profile = profile_manager::load_profile(&active_profile).unwrap_or_else(|_| {
+        crate::models::Profile::new(active_profile, String::new())
+    });
+
+    let profile_names: HashSet<String> = profile.mods.iter().map(|m| m.full_name.clone()).collect();
+    let mut unmanaged = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if entry.path().is_dir() && !name.starts_with('.') && !profile_names.contains(&name) {
+                unmanaged.push(name);
+            }
+        }
+    }
+
+    Ok(unmanaged)
+}
+
 fn emit_progress(
     app: &tauri::AppHandle,
     stage: &str, mod_name: &str,
