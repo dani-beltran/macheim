@@ -1,0 +1,213 @@
+use std::path::PathBuf;
+
+use chrono::{DateTime, Utc};
+use tracing::{debug, info};
+
+use crate::error::{AppError, AppResult};
+use crate::models::thunderstore::{PackageListing, ThunderstorePackage};
+
+const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/valheim/api/v1/package/";
+const CACHE_MAX_AGE_MINUTES: i64 = 30;
+
+/// Get the application data directory for cache and config storage.
+pub fn get_app_data_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+    home.join("Library/Application Support/com.macheim")
+}
+
+/// Get the cache directory for Thunderstore data.
+fn get_cache_dir() -> PathBuf {
+    get_app_data_dir().join("cache/thunderstore")
+}
+
+/// Get the path to the cached packages file.
+fn get_cache_file() -> PathBuf {
+    get_cache_dir().join("packages.json")
+}
+
+/// Check if the cache is still valid (less than 30 minutes old).
+fn is_cache_valid() -> bool {
+    let cache_file = get_cache_file();
+    if !cache_file.exists() {
+        return false;
+    }
+
+    match std::fs::metadata(&cache_file) {
+        Ok(meta) => {
+            if let Ok(modified) = meta.modified() {
+                let modified_dt: DateTime<Utc> = modified.into();
+                let age = Utc::now() - modified_dt;
+                age.num_minutes() < CACHE_MAX_AGE_MINUTES
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// Load packages from the disk cache.
+fn load_cache() -> AppResult<Vec<ThunderstorePackage>> {
+    let cache_file = get_cache_file();
+    let content = std::fs::read_to_string(&cache_file)?;
+    let packages: Vec<ThunderstorePackage> = serde_json::from_str(&content)?;
+    debug!("Loaded {} packages from cache", packages.len());
+    Ok(packages)
+}
+
+/// Save packages to the disk cache.
+fn save_cache(packages: &[ThunderstorePackage]) -> AppResult<()> {
+    let cache_dir = get_cache_dir();
+    std::fs::create_dir_all(&cache_dir)?;
+    let cache_file = get_cache_file();
+    let content = serde_json::to_string(packages)?;
+    std::fs::write(&cache_file, content)?;
+    debug!("Saved {} packages to cache", packages.len());
+    Ok(())
+}
+
+/// Fetch all Valheim packages from Thunderstore API.
+/// Uses disk cache if available and fresh (< 30 minutes).
+pub async fn fetch_packages(force_refresh: bool) -> AppResult<Vec<ThunderstorePackage>> {
+    // Check cache first
+    if !force_refresh && is_cache_valid() {
+        info!("Using cached Thunderstore data");
+        match load_cache() {
+            Ok(packages) => return Ok(packages),
+            Err(e) => {
+                debug!("Cache load failed, fetching fresh: {}", e);
+            }
+        }
+    }
+
+    info!("Fetching packages from Thunderstore API...");
+    let client = reqwest::Client::builder()
+        .user_agent("Macheim/1.0.0")
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
+
+    let response = client
+        .get(THUNDERSTORE_API_URL)
+        .send()
+        .await
+        .map_err(|e| AppError::Network(format!("Failed to fetch packages: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(AppError::Network(format!(
+            "Thunderstore API returned status: {}",
+            response.status()
+        )));
+    }
+
+    let packages: Vec<ThunderstorePackage> = response
+        .json()
+        .await
+        .map_err(|e| AppError::Network(format!("Failed to parse response: {}", e)))?;
+
+    info!("Fetched {} packages from Thunderstore", packages.len());
+
+    // Save to cache
+    if let Err(e) = save_cache(&packages) {
+        debug!("Failed to save cache: {}", e);
+    }
+
+    Ok(packages)
+}
+
+/// Search cached packages by query string.
+/// Matches against name, description, and owner (case-insensitive contains).
+pub fn search_packages(
+    packages: &[ThunderstorePackage],
+    query: &str,
+) -> Vec<PackageListing> {
+    let query_lower = query.to_lowercase();
+    let terms: Vec<&str> = query_lower.split_whitespace().collect();
+
+    packages
+        .iter()
+        .filter(|pkg| {
+            if terms.is_empty() {
+                return true;
+            }
+            let name_lower = pkg.name.to_lowercase();
+            let owner_lower = pkg.owner.to_lowercase();
+            let full_name_lower = pkg.full_name.to_lowercase();
+            let desc_lower = pkg
+                .versions
+                .first()
+                .map(|v| v.description.to_lowercase())
+                .unwrap_or_default();
+
+            terms.iter().all(|term| {
+                name_lower.contains(term)
+                    || owner_lower.contains(term)
+                    || full_name_lower.contains(term)
+                    || desc_lower.contains(term)
+            })
+        })
+        .map(PackageListing::from)
+        .collect()
+}
+
+/// Find a specific package by full name (e.g., "denikson-BepInExPack_Valheim").
+pub fn find_package<'a>(
+    packages: &'a [ThunderstorePackage],
+    full_name: &str,
+) -> Option<&'a ThunderstorePackage> {
+    packages.iter().find(|p| p.full_name == full_name)
+}
+
+/// Download a mod's ZIP file and return the bytes. No timeout on download body.
+pub async fn download_mod(download_url: &str) -> AppResult<Vec<u8>> {
+    download_mod_with_progress(download_url, None).await
+}
+
+/// Progress callback type: (downloaded_bytes, total_bytes_option)
+pub type ProgressFn = Box<dyn Fn(u64, Option<u64>) + Send>;
+
+/// Download a mod's ZIP with optional progress callback. No body timeout.
+pub async fn download_mod_with_progress(
+    download_url: &str,
+    progress: Option<ProgressFn>,
+) -> AppResult<Vec<u8>> {
+    info!("Downloading mod from: {}", download_url);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Macheim/1.0.0")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        // No overall timeout - large mods can be 200MB+
+        .build()
+        .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
+
+    let response = client
+        .get(download_url)
+        .send()
+        .await
+        .map_err(|e| AppError::Network(format!("Download failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(AppError::Network(format!(
+            "Download returned status: {}",
+            response.status()
+        )));
+    }
+
+    let total_size = response.content_length();
+
+    // Stream the response body
+    let mut bytes = Vec::with_capacity(total_size.unwrap_or(1024 * 1024) as usize);
+    let mut stream = response.bytes_stream();
+
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AppError::Network(format!("Download stream error: {}", e)))?;
+        bytes.extend_from_slice(&chunk);
+        if let Some(ref cb) = progress {
+            cb(bytes.len() as u64, total_size);
+        }
+    }
+
+    info!("Downloaded {} bytes", bytes.len());
+    Ok(bytes)
+}

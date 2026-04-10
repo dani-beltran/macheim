@@ -1,0 +1,81 @@
+use std::sync::Mutex;
+
+use tracing::info;
+
+use crate::error::AppResult;
+use crate::services::game_detector::{self, GameStatus};
+use crate::AppState;
+
+/// Detect the Valheim installation and store the path in app state.
+#[tauri::command]
+pub async fn detect_game(state: tauri::State<'_, Mutex<AppState>>) -> AppResult<GameStatus> {
+    info!("Command: detect_game");
+
+    match game_detector::detect_valheim() {
+        Ok(path) => {
+            let game_root = game_detector::get_valheim_root(&path);
+
+            // Check BepInEx status
+            let bepinex_installed =
+                crate::services::bepinex_installer::check_bepinex_status(&game_root).installed;
+
+            let mut state = state.lock().map_err(|e| {
+                crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
+            })?;
+            state.game_path = Some(path.clone());
+            state.bepinex_installed = bepinex_installed;
+
+            let status = game_detector::get_game_status_info(&Some(path), bepinex_installed, &state.active_profile);
+            Ok(status)
+        }
+        Err(e) => {
+            let mut state = state.lock().map_err(|e| {
+                crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
+            })?;
+            state.game_path = None;
+            state.bepinex_installed = false;
+
+            Err(e)
+        }
+    }
+}
+
+/// Get the current game status without re-detecting.
+#[tauri::command]
+pub async fn get_game_status(state: tauri::State<'_, Mutex<AppState>>) -> AppResult<GameStatus> {
+    let state = state.lock().map_err(|e| {
+        crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
+    })?;
+
+    Ok(game_detector::get_game_status_info(&state.game_path, state.bepinex_installed, &state.active_profile))
+}
+
+/// Set the game path manually (e.g., from a directory picker).
+#[tauri::command]
+pub async fn set_game_path(
+    path: String,
+    state: tauri::State<'_, Mutex<AppState>>,
+) -> AppResult<GameStatus> {
+    info!("Command: set_game_path({})", path);
+
+    let path_buf = std::path::PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(crate::error::AppError::GameNotFound(format!(
+            "Path does not exist: {}",
+            path
+        )));
+    }
+
+    let game_root = game_detector::get_valheim_root(&path_buf);
+    let bepinex_installed =
+        crate::services::bepinex_installer::check_bepinex_status(&game_root).installed;
+
+    let mut state = state.lock().map_err(|e| {
+        crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
+    })?;
+    state.game_path = Some(path_buf.clone());
+    state.bepinex_installed = bepinex_installed;
+
+    let status = game_detector::get_game_status_info(&Some(path_buf), bepinex_installed, &state.active_profile);
+    Ok(status)
+}
