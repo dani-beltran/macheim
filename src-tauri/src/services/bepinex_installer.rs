@@ -23,11 +23,16 @@ pub fn check_bepinex_status(game_root: &Path) -> BepInExStatus {
     let bepinex_dir = game_root.join("BepInEx");
     let bepinex_core = bepinex_dir.join("core");
     let doorstop_lib = game_root.join("libdoorstop.dylib");
-    let doorstop_lib_alt = game_root.join("doorstop_libs").join("libdoorstop.dylib");
+    let doorstop_libs_dir = game_root.join("doorstop_libs");
+    let doorstop_lib_alt = doorstop_libs_dir.join("libdoorstop.dylib");
+    let doorstop_lib_x64 = doorstop_libs_dir.join("libdoorstop_x64.dylib");
     let bepinex_cfg = bepinex_dir.join("config").join("BepInEx.cfg");
     let run_script = game_root.join("run_bepinex.sh");
+    let start_script = game_root.join("start_game_bepinex.sh");
 
-    let installed = bepinex_core.exists() && (doorstop_lib.exists() || doorstop_lib_alt.exists() || run_script.exists());
+    let has_doorstop = doorstop_lib.exists() || doorstop_lib_alt.exists() || doorstop_lib_x64.exists();
+    let has_script = run_script.exists() || start_script.exists();
+    let installed = bepinex_core.exists() && (has_doorstop || has_script);
 
     let version = if bepinex_core.exists() {
         read_bepinex_version(&bepinex_core)
@@ -35,7 +40,7 @@ pub fn check_bepinex_status(game_root: &Path) -> BepInExStatus {
         None
     };
 
-    let doorstop_found = doorstop_lib.exists() || doorstop_lib_alt.exists();
+    let doorstop_found = has_doorstop;
 
     let config_patched = if bepinex_cfg.exists() {
         check_config_patched(&bepinex_cfg)

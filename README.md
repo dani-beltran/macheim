@@ -12,17 +12,11 @@
 
 A native macOS mod manager for [Valheim](https://store.steampowered.com/app/892970/Valheim/), built with Tauri v2. Browse, install, and manage mods from [Thunderstore](https://thunderstore.io/c/valheim/) with a single click. No terminal required.
 
-<!-- 
 ## Screenshots
 
-| Setup Wizard | Mod Browser |
-|:---:|:---:|
-| ![Setup](screenshots/setup.png) | ![Browse](screenshots/browse.png) |
-
-| Installed Mods | Config Editor |
-|:---:|:---:|
-| ![Installed](screenshots/installed.png) | ![Config](screenshots/config.png) |
--->
+| Mod Browser | Installed Mods | Modpacks |
+|:---:|:---:|:---:|
+| ![Browse Mods](screenshots/browse-mods.png) | ![Installed Mods](screenshots/installed-mods.png) | ![Modpacks](screenshots/modpacks.png) |
 
 ## Features
 
@@ -50,7 +44,7 @@ A native macOS mod manager for [Valheim](https://store.steampowered.com/app/8929
 
 ### Download
 
-1. Download `Macheim.dmg` from the [Releases](https://github.com/iyeonsang/macheim/releases) page
+1. Download `Macheim.dmg` from the [Releases](https://github.com/lofcgi/macheim/releases) page
 2. Open the DMG and drag **Macheim** to your Applications folder
 3. On first launch, if macOS blocks the app, go to **System Settings > Privacy & Security** and click **Open Anyway**
 
@@ -59,7 +53,7 @@ A native macOS mod manager for [Valheim](https://store.steampowered.com/app/8929
 Prerequisites: [Node.js](https://nodejs.org/) 18+, [Rust](https://rustup.rs/) 1.70+, [Tauri CLI](https://tauri.app/start/)
 
 ```bash
-git clone https://github.com/iyeonsang/macheim.git
+git clone https://github.com/lofcgi/macheim.git
 cd macheim
 npm install
 npm run tauri build

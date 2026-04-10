@@ -54,34 +54,29 @@ pub fn get_bundle_executable(app_path: &Path) -> AppResult<String> {
 pub fn launch_modded(_app_path: &Path, game_root: &Path) -> AppResult<()> {
     info!("Launching Valheim with BepInEx...");
 
-    let run_script = game_root.join("run_bepinex.sh");
-
-    if !run_script.exists() {
-        return Err(AppError::GameNotFound(
-            "run_bepinex.sh not found. Please reinstall BepInEx.".to_string(),
-        ));
-    }
+    // Find doorstop library (may be in root or doorstop_libs/)
+    let doorstop = find_doorstop_lib(game_root)
+        .or_else(|| find_doorstop_lib(&game_root.join("doorstop_libs")))
+        .ok_or_else(|| {
+            AppError::GameNotFound("doorstop library not found. Please reinstall BepInEx.".to_string())
+        })?;
 
     // Remove quarantine from doorstop library
-    let doorstop_lib = game_root.join("libdoorstop.dylib");
-    if doorstop_lib.exists() {
-        let _ = Command::new("xattr")
-            .args(["-dr", "com.apple.quarantine"])
-            .arg(&doorstop_lib)
-            .output();
-    }
+    let _ = Command::new("xattr")
+        .args(["-dr", "com.apple.quarantine"])
+        .arg(&doorstop)
+        .output();
 
     // Verified working method: arch -x86_64 + env + direct DYLD injection
     // This bypasses run_bepinex.sh (which has arm64 conflict) and injects directly.
     let executable_name = get_bundle_executable(&game_root.join("valheim.app"))?;
     let executable = game_root.join("valheim.app/Contents/MacOS").join(&executable_name);
-    let doorstop = game_root.join("libdoorstop.dylib");
     let preloader = game_root.join("BepInEx/core/BepInEx.Preloader.dll");
 
-    if !executable.exists() || !doorstop.exists() || !preloader.exists() {
+    if !executable.exists() || !preloader.exists() {
         return Err(AppError::GameNotFound(format!(
-            "Missing files: exec={} doorstop={} preloader={}",
-            executable.exists(), doorstop.exists(), preloader.exists()
+            "Missing files: exec={} preloader={}",
+            executable.exists(), preloader.exists()
         )));
     }
 
