@@ -4,6 +4,7 @@ use tracing::info;
 
 use crate::error::AppResult;
 use crate::services::game_detector::{self, GameStatus};
+use crate::services::profile_manager;
 use crate::AppState;
 
 /// Detect the Valheim installation and store the path in app state.
@@ -19,12 +20,24 @@ pub async fn detect_game(state: tauri::State<'_, Mutex<AppState>>) -> AppResult<
             let bepinex_installed =
                 crate::services::bepinex_installer::check_bepinex_status(&game_root).installed;
 
-            let mut state = state.lock().map_err(|e| {
+            let (active_profile, game_path_was_none) = {
+                let mut state = state.lock().map_err(|e| {
+                    crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
+                })?;
+                let was_none = state.game_path.is_none();
+                state.game_path = Some(path.clone());
+                state.bepinex_installed = bepinex_installed;
+                (state.active_profile.clone(), was_none)
+            };
+
+            // On first detection, import any existing manually installed mods
+            if game_path_was_none && bepinex_installed {
+                let _ = profile_manager::import_existing_mods(&active_profile, &game_root);
+            }
+
+            let state = state.lock().map_err(|e| {
                 crate::error::AppError::GameNotFound(format!("Failed to lock state: {}", e))
             })?;
-            state.game_path = Some(path.clone());
-            state.bepinex_installed = bepinex_installed;
-
             let status = game_detector::get_game_status_info(&Some(path), bepinex_installed, &state.active_profile);
             Ok(status)
         }

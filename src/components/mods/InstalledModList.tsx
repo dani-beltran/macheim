@@ -16,6 +16,7 @@ import {
   toggleMod,
   uninstallMod,
   syncMods,
+  listUnmanagedMods,
 } from "../../lib/tauri";
 
 export default function InstalledModList() {
@@ -164,7 +165,17 @@ export default function InstalledModList() {
             onClick={async () => {
               setSyncing(true);
               try {
-                const result = await syncMods(true);
+                // Check for unmanaged mods before cleaning
+                const unmanaged = await listUnmanagedMods();
+                let doClean = false;
+                if (unmanaged.length > 0) {
+                  doClean = window.confirm(
+                    `The following ${unmanaged.length} mod(s) are not managed by Macheim and will be removed:\n\n` +
+                    unmanaged.join("\n") +
+                    "\n\nProceed with cleanup?"
+                  );
+                }
+                const result = await syncMods(doClean);
                 const msgs: string[] = [];
                 if (result.reinstalled.length > 0) msgs.push(`${result.reinstalled.length} reinstalled`);
                 if (result.cleaned.length > 0) msgs.push(`${result.cleaned.length} cleaned`);

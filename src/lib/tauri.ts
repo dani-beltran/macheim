@@ -80,6 +80,10 @@ export async function syncMods(cleanUnmanaged?: boolean): Promise<SyncResult> {
   return invoke<SyncResult>("sync_mods", { cleanUnmanaged: cleanUnmanaged ?? false });
 }
 
+export async function listUnmanagedMods(): Promise<string[]> {
+  return invoke<string[]>("list_unmanaged_mods");
+}
+
 // ── Profiles ────────────────────────────────────────────────────
 
 export async function listProfiles(): Promise<Profile[]> {
