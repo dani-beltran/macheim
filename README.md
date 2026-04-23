@@ -4,7 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-blue.svg)]()
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)]()
+[![Latest Release](https://img.shields.io/github/v/release/lofcgi/macheim)](https://github.com/lofcgi/macheim/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/lofcgi/macheim/total.svg)](https://github.com/lofcgi/macheim/releases)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%20v2-orange.svg)](https://tauri.app)
 
 > [r2modman](https://github.com/ebkr/r2modmanPlus) and Thunderstore Mod Manager don't support macOS.
